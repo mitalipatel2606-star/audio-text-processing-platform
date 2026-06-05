@@ -1,0 +1,3 @@
+# Allow tracking wav and txt files inside this data folder
+!*.wav
+!*.txt
