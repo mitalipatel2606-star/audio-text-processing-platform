@@ -1,0 +1,15 @@
+# Audio files
+*.wav
+
+# Model files
+*.onnx
+*.onnx.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local settings / IDE
+.DS_Store
+.idea/
+.vscode/
