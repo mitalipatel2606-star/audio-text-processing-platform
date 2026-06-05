@@ -2,28 +2,48 @@ import sounddevice as sd
 import soundfile as sf
 from faster_whisper import WhisperModel
 import sys
+import queue
+import numpy as np
 
 # Parameters
 FS = 16000
-DURATION = 5  # seconds
+CHANNELS = 1
 FILENAME = "user_sample.wav"
 
-print("\n--- Speech-to-Text Microphone Test ---")
-print(f"We will record {DURATION} seconds of audio.")
+print("\n--- Speech-to-Text Microphone Test (Variable Length) ---")
 input("Press Enter to start recording...")
 
-print("\n[RECORDING] Speak now...")
+print("\n[RECORDING STARTED] Speak now...")
+print(">>> Press ENTER to STOP recording <<<")
+
+q = queue.Queue()
+
+def callback(indata, frames, time, status):
+    if status:
+        print(status, file=sys.stderr)
+    q.put(indata.copy())
+
 try:
-    recording = sd.rec(int(DURATION * FS), samplerate=FS, channels=1)
-    sd.wait()  # Wait until the recording is finished
+    with sd.InputStream(samplerate=FS, channels=CHANNELS, callback=callback):
+        input()  # Wait for user to hit Enter to stop
     print("[RECORDING COMPLETE]")
 except Exception as e:
     print(f"Error recording audio: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Save the recording
-sf.write(FILENAME, recording, FS)
-print(f"Saved audio to {FILENAME}")
+# Collect audio data
+data = []
+while not q.empty():
+    data.append(q.get())
+
+if data:
+    recording = np.concatenate(data, axis=0)
+    sf.write(FILENAME, recording, FS)
+    duration = len(recording) / FS
+    print(f"Saved audio to {FILENAME} ({duration:.2f}s)")
+else:
+    print("No audio data was captured.")
+    sys.exit(1)
 
 # Run transcription
 print("\nLoading Whisper model...")

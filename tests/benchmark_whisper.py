@@ -123,14 +123,13 @@ def run_benchmark():
             print(f"  Hyp : {transcribed_text}")
 
         if total_audio_duration_seconds > 0:
-            # Latency = seconds of processing time per minute of audio
             avg_latency = total_inference_time_seconds / (total_audio_duration_seconds / 60.0)
             avg_wer = sum(wer_scores) / len(wer_scores) if wer_scores else 0.0
             results[model_name] = {"latency": avg_latency, "wer": avg_wer}
         else:
             print("No valid audio duration recorded.")
 
-    # Print Summary Table
+    # Print Summary Table to stdout
     print("\n\n==========================================")
     print("           BENCHMARK RESULTS TABLE        ")
     print("==========================================")
@@ -144,6 +143,26 @@ def run_benchmark():
         else:
             print(f"| {model_name.capitalize():<10} | {'N/A':<30} | {'N/A':<10} |")
     print("==========================================\n")
+
+    # Save Summary Table to a markdown file
+    docs_dir = "docs"
+    os.makedirs(docs_dir, exist_ok=True)
+    report_path = os.path.join(docs_dir, "benchmark_results.md")
+    
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("# Faster-Whisper Benchmarking Results\n\n")
+        f.write(f"Evaluated on **{len(audio_files)}** audio samples.\n\n")
+        f.write(f"| Model | Latency (sec/min of audio) | WER (%) |\n")
+        f.write(f"| :--- | :--- | :--- |\n")
+        for model_name in models_to_test:
+            if model_name in results:
+                latency = f"{results[model_name]['latency']:.2f}s"
+                wer = f"{results[model_name]['wer']:.2%}"
+                f.write(f"| **{model_name.capitalize()}** | {latency} | {wer} |\n")
+            else:
+                f.write(f"| **{model_name.capitalize()}** | N/A | N/A |\n")
+                
+    print(f"Benchmark results successfully stored in: {report_path}\n")
 
 if __name__ == "__main__":
     run_benchmark()
