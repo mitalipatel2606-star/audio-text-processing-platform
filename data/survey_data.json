@@ -1,0 +1,202 @@
+{
+  "tts": [
+    {
+      "id": "tts_1",
+      "text": "Welcome to the local speech evaluation pipeline.",
+      "voice_evals": [
+        {
+          "voice": "Amy (Medium)",
+          "audio_path": "/data/generated_samples/Amy_Medium_sample1.wav"
+        },
+        {
+          "voice": "Lessac (Medium)",
+          "audio_path": "/data/generated_samples/Lessac_Medium_sample1.wav"
+        },
+        {
+          "voice": "Joe (Medium)",
+          "audio_path": "/data/generated_samples/Joe_Medium_sample1.wav"
+        },
+        {
+          "voice": "Ryan (Medium)",
+          "audio_path": "/data/generated_samples/Ryan_Medium_sample1.wav"
+        },
+        {
+          "voice": "Danny (Low)",
+          "audio_path": "/data/generated_samples/Danny_Low_sample1.wav"
+        }
+      ]
+    },
+    {
+      "id": "tts_2",
+      "text": "Your audio has been successfully transcribed into text.",
+      "voice_evals": [
+        {
+          "voice": "Amy (Medium)",
+          "audio_path": "/data/generated_samples/Amy_Medium_sample2.wav"
+        },
+        {
+          "voice": "Lessac (Medium)",
+          "audio_path": "/data/generated_samples/Lessac_Medium_sample2.wav"
+        },
+        {
+          "voice": "Joe (Medium)",
+          "audio_path": "/data/generated_samples/Joe_Medium_sample2.wav"
+        },
+        {
+          "voice": "Ryan (Medium)",
+          "audio_path": "/data/generated_samples/Ryan_Medium_sample2.wav"
+        },
+        {
+          "voice": "Danny (Low)",
+          "audio_path": "/data/generated_samples/Danny_Low_sample2.wav"
+        }
+      ]
+    },
+    {
+      "id": "tts_3",
+      "text": "Synthesizing high-quality natural voice notes for testing purposes.",
+      "voice_evals": [
+        {
+          "voice": "Amy (Medium)",
+          "audio_path": "/data/generated_samples/Amy_Medium_sample3.wav"
+        },
+        {
+          "voice": "Lessac (Medium)",
+          "audio_path": "/data/generated_samples/Lessac_Medium_sample3.wav"
+        },
+        {
+          "voice": "Joe (Medium)",
+          "audio_path": "/data/generated_samples/Joe_Medium_sample3.wav"
+        },
+        {
+          "voice": "Ryan (Medium)",
+          "audio_path": "/data/generated_samples/Ryan_Medium_sample3.wav"
+        },
+        {
+          "voice": "Danny (Low)",
+          "audio_path": "/data/generated_samples/Danny_Low_sample3.wav"
+        }
+      ]
+    },
+    {
+      "id": "tts_4",
+      "text": "Evaluating speech-to-text accuracy and response latency on local hardware.",
+      "voice_evals": [
+        {
+          "voice": "Amy (Medium)",
+          "audio_path": "/data/generated_samples/Amy_Medium_sample4.wav"
+        },
+        {
+          "voice": "Lessac (Medium)",
+          "audio_path": "/data/generated_samples/Lessac_Medium_sample4.wav"
+        },
+        {
+          "voice": "Joe (Medium)",
+          "audio_path": "/data/generated_samples/Joe_Medium_sample4.wav"
+        },
+        {
+          "voice": "Ryan (Medium)",
+          "audio_path": "/data/generated_samples/Ryan_Medium_sample4.wav"
+        },
+        {
+          "voice": "Danny (Low)",
+          "audio_path": "/data/generated_samples/Danny_Low_sample4.wav"
+        }
+      ]
+    },
+    {
+      "id": "tts_5",
+      "text": "This is a product demonstration of local Piper text-to-speech synthesis.",
+      "voice_evals": [
+        {
+          "voice": "Amy (Medium)",
+          "audio_path": "/data/generated_samples/Amy_Medium_sample5.wav"
+        },
+        {
+          "voice": "Lessac (Medium)",
+          "audio_path": "/data/generated_samples/Lessac_Medium_sample5.wav"
+        },
+        {
+          "voice": "Joe (Medium)",
+          "audio_path": "/data/generated_samples/Joe_Medium_sample5.wav"
+        },
+        {
+          "voice": "Ryan (Medium)",
+          "audio_path": "/data/generated_samples/Ryan_Medium_sample5.wav"
+        },
+        {
+          "voice": "Danny (Low)",
+          "audio_path": "/data/generated_samples/Danny_Low_sample5.wav"
+        }
+      ]
+    }
+  ],
+  "stt": [
+    {
+      "id": "audio_1",
+      "filename": "LJ001-0001.wav",
+      "audio_path": "/data/audio/LJ001-0001.wav",
+      "reference_text": "Printing, in the only sense with which we are at present concerned, differs from most if not from all the arts and crafts represented in the Exhibition"
+    },
+    {
+      "id": "audio_2",
+      "filename": "LJ001-0002.wav",
+      "audio_path": "/data/audio/LJ001-0002.wav",
+      "reference_text": "in being comparatively modern."
+    },
+    {
+      "id": "audio_3",
+      "filename": "LJ001-0003.wav",
+      "audio_path": "/data/audio/LJ001-0003.wav",
+      "reference_text": "For although the Chinese took impressions from wood blocks engraved in relief for centuries before the woodcutters of the Netherlands, by a similar process"
+    },
+    {
+      "id": "audio_4",
+      "filename": "LJ001-0004.wav",
+      "audio_path": "/data/audio/LJ001-0004.wav",
+      "reference_text": "produced the block books, which were the immediate predecessors of the true printed book,"
+    },
+    {
+      "id": "audio_5",
+      "filename": "LJ001-0005.wav",
+      "audio_path": "/data/audio/LJ001-0005.wav",
+      "reference_text": "the invention of movable metal letters in the middle of the fifteenth century may justly be considered as the invention of the art of printing."
+    },
+    {
+      "id": "audio_6",
+      "filename": "LJ001-0006.wav",
+      "audio_path": "/data/audio/LJ001-0006.wav",
+      "reference_text": "And it is worth mention in passing that, as an example of fine typography,"
+    },
+    {
+      "id": "audio_7",
+      "filename": "audio1.wav",
+      "audio_path": "/data/audio/audio1.wav",
+      "reference_text": "Hello everyone. My name is Mitali Patel and today I am testing the speech recognition system. The purpose of this recording is to evaluate how accurately spoken words are converted into text. This sample contains clear pronunciation and minimal background noise."
+    },
+    {
+      "id": "audio_8",
+      "filename": "audio2.wav",
+      "audio_path": "/data/audio/audio2.wav",
+      "reference_text": "Hello everyone. My name is Mitali Patel and today I am testing the speech recognition system. The purpose of this recording is to evaluate how accurately spoken words are converted into text. This sample contains clear pronunciation and minimal background noise."
+    },
+    {
+      "id": "audio_9",
+      "filename": "audio3.wav",
+      "audio_path": "/data/audio/audio3.wav",
+      "reference_text": "I moved to London when i was 4 years old"
+    },
+    {
+      "id": "audio_10",
+      "filename": "audio4.wav",
+      "audio_path": "/data/audio/audio4.wav",
+      "reference_text": "Make your audios go from this to this"
+    },
+    {
+      "id": "audio_11",
+      "filename": "audio5.wav",
+      "audio_path": "/data/audio/audio5.wav",
+      "reference_text": "Here there is a system for everything which i dont like. Where are you from"
+    }
+  ]
+}

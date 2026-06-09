@@ -1,0 +1,30 @@
+[
+  {
+    "userInfo": {
+      "name": "Docker Test User",
+      "age": "25-34",
+      "noise": "quiet"
+    },
+    "ttsResponses": [
+      {
+        "id": "tts_1",
+        "voice": "Amy (Medium)",
+        "naturalness": 5,
+        "pronunciation": 4,
+        "intonation": 5,
+        "overall": 5
+      }
+    ],
+    "sttResponses": [
+      {
+        "id": "audio_1",
+        "filename": "test.wav",
+        "clarity": 4,
+        "intelligibility": 5,
+        "noise": 4,
+        "overall": 4
+      }
+    ],
+    "comments": "Test from Docker Compose curl"
+  }
+]
