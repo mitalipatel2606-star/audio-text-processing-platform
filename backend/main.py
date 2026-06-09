@@ -6,8 +6,30 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import redis
 
 app = FastAPI(title="STT and TTS Survey Evaluation Platform")
+
+_redis_client = None
+
+def get_redis_client():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        return None
+        
+    try:
+        client = redis.Redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2.0)
+        client.ping()
+        _redis_client = client
+        print(f"Connected to Redis at {redis_url}")
+        return _redis_client
+    except Exception as e:
+        print(f"Warning: Redis connection attempt failed ({str(e)}). Using local file fallback.")
+        return None
 
 # CORS middleware for testing flexibility
 app.add_middleware(
@@ -87,9 +109,40 @@ def get_survey_config():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading config: {str(e)}")
 
+@app.get("/api/health")
+def health_check():
+    r_client = get_redis_client()
+    redis_status = "disconnected"
+    if r_client:
+        try:
+            r_client.ping()
+            redis_status = "connected"
+        except Exception:
+            redis_status = "connection_failed"
+            
+    return {
+        "status": "ok",
+        "redis": redis_status,
+        "responses_file_exists": os.path.exists(RESPONSES_PATH)
+    }
+
 @app.post("/api/submit-survey")
 def submit_survey(submission: SurveySubmission):
     try:
+        payload = submission.model_dump()
+        
+        # 1. Save to Redis if available
+        r_client = get_redis_client()
+        redis_saved = False
+        if r_client:
+            try:
+                r_client.rpush("survey_responses", json.dumps(payload))
+                redis_saved = True
+                print("Response saved to Redis.")
+            except Exception as re:
+                print(f"Failed to write to Redis: {str(re)}")
+
+        # 2. Save to local JSON file for persistence/fallback
         responses = []
         if os.path.exists(RESPONSES_PATH):
             with open(RESPONSES_PATH, "r", encoding="utf-8") as f:
@@ -100,29 +153,64 @@ def submit_survey(submission: SurveySubmission):
                 except json.JSONDecodeError:
                     responses = []
 
-        responses.append(submission.model_dump())
+        responses.append(payload)
         
         with open(RESPONSES_PATH, "w", encoding="utf-8") as f:
             json.dump(responses, f, indent=2)
             
-        return {"status": "success", "message": "Survey submitted successfully!"}
+        status_msg = "Survey submitted successfully!"
+        if redis_saved:
+            status_msg += " (Saved to Redis & Disk)"
+        else:
+            status_msg += " (Saved to Disk)"
+            
+        return {"status": "success", "message": status_msg}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error saving survey response: {str(e)}")
 
 @app.get("/api/results")
 def get_survey_results():
-    if not os.path.exists(RESPONSES_PATH):
-        return {
-            "summary": {"tts": {}, "stt": {}},
-            "total_submissions": 0,
-            "raw_responses": []
-        }
+    responses = []
+    
+    # Try fetching from Redis first
+    r_client = get_redis_client()
+    redis_loaded = False
+    if r_client:
+        try:
+            raw_responses = r_client.lrange("survey_responses", 0, -1)
+            if raw_responses:
+                responses = [json.loads(r) for r in raw_responses]
+                redis_loaded = True
+                print(f"Loaded {len(responses)} responses from Redis.")
+            else:
+                # If Redis is empty but local file has data, sync local data into Redis
+                if os.path.exists(RESPONSES_PATH):
+                    with open(RESPONSES_PATH, "r", encoding="utf-8") as f:
+                        try:
+                            responses = json.load(f)
+                            if not isinstance(responses, list):
+                                responses = []
+                        except json.JSONDecodeError:
+                            responses = []
+                    
+                    if responses:
+                        print(f"Syncing {len(responses)} local responses to Redis.")
+                        for resp in responses:
+                            r_client.rpush("survey_responses", json.dumps(resp))
+                        redis_loaded = True
+        except Exception as re:
+            print(f"Failed to read from/sync to Redis: {str(re)}")
 
-    try:
-        with open(RESPONSES_PATH, "r", encoding="utf-8") as f:
-            responses = json.load(f)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading responses: {str(e)}")
+    # Fall back to file if Redis check didn't succeed or didn't fetch data
+    if not redis_loaded:
+        if os.path.exists(RESPONSES_PATH):
+            try:
+                with open(RESPONSES_PATH, "r", encoding="utf-8") as f:
+                    responses = json.load(f)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error reading responses: {str(e)}")
+        else:
+            responses = []
 
     # Group scores by model
     tts_scores: Dict[str, Dict[str, List[int]]] = {}
