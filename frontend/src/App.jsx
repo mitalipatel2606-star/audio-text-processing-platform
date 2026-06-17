@@ -161,7 +161,7 @@ export default function App() {
       setIsTranscribing(true);
       setTranscribeResult(null);
       
-      const res = await fetch(`${API_BASE}/api/transcribe`, {
+      const res = await fetch(`${API_BASE}/api/v1/stt`, {
         method: "POST",
         body: formData,
       });

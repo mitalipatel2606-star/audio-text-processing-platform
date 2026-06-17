@@ -23,7 +23,7 @@ class TestApiTranscribe(unittest.TestCase):
         # Test default transcription without specifying model or language
         with open(self.audio_file, "rb") as f:
             response = self.client.post(
-                "/api/transcribe",
+                "/api/v1/stt",
                 files={"file": (self.audio_file, f, "audio/wav")}
             )
             
@@ -51,7 +51,7 @@ class TestApiTranscribe(unittest.TestCase):
         # Test passing model and language via Form parameters
         with open(self.audio_file, "rb") as f:
             response = self.client.post(
-                "/api/transcribe",
+                "/api/v1/stt",
                 files={"file": (self.audio_file, f, "audio/wav")},
                 data={"model": "tiny", "language": "en"}
             )
@@ -74,7 +74,7 @@ class TestApiTranscribe(unittest.TestCase):
         # Test passing model and language via Query parameters
         with open(self.audio_file, "rb") as f:
             response = self.client.post(
-                "/api/transcribe?model=tiny&language=en",
+                "/api/v1/stt?model=tiny&language=en",
                 files={"file": (self.audio_file, f, "audio/wav")}
             )
             
@@ -94,7 +94,7 @@ class TestApiTranscribe(unittest.TestCase):
 
     def test_transcribe_missing_file(self):
         # Test endpoint error response when no file is uploaded
-        response = self.client.post("/api/transcribe")
+        response = self.client.post("/api/v1/stt")
         self.assertEqual(response.status_code, 422)  # Unprocessable Entity (ValidationError)
 
 if __name__ == "__main__":

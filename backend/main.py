@@ -272,7 +272,7 @@ def get_survey_results():
 # Create a temp directory inside the project root for temporary uploads
 TEMP_DIR = os.path.join(project_root, "backend", "temp_uploads")
 
-@app.post("/api/transcribe")
+@app.post("/api/v1/stt")
 async def transcribe_audio_endpoint(
     file: UploadFile = File(...),
     model: str = Form(None),
