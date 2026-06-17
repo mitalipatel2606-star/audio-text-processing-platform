@@ -12,6 +12,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./backend:/app/backend
+      - ./services:/app/services
     depends_on:
       - redis
 

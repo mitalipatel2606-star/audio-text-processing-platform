@@ -6,9 +6,10 @@ WORKDIR /app
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r ./backend/requirements.txt
 
-# Copy backend files and default data
+# Copy backend files, default data, and services
 COPY backend ./backend
 COPY data ./data
+COPY services ./services
 
 EXPOSE 8000
 

@@ -22,6 +22,13 @@ export default function App() {
   const [dashboardData, setDashboardData] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Custom Transcribe tool states
+  const [transcribeFile, setTranscribeFile] = useState(null);
+  const [transcribeModel, setTranscribeModel] = useState("base");
+  const [transcribeLanguage, setTranscribeLanguage] = useState("");
+  const [transcribeResult, setTranscribeResult] = useState(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
   // Chart Canvas Refs
   const ttsChartCanvasRef = useRef(null);
   const sttChartCanvasRef = useRef(null);
@@ -130,6 +137,47 @@ export default function App() {
       alert("Error submitting survey. Please check your backend connection and try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Submit custom audio file for transcription
+  const handleTranscribeSubmit = async (e) => {
+    e.preventDefault();
+    if (!transcribeFile) {
+      alert("Please select or drop an audio file to transcribe.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", transcribeFile);
+    if (transcribeModel) {
+      formData.append("model", transcribeModel);
+    }
+    if (transcribeLanguage) {
+      formData.append("language", transcribeLanguage);
+    }
+
+    try {
+      setIsTranscribing(true);
+      setTranscribeResult(null);
+      
+      const res = await fetch(`${API_BASE}/api/transcribe`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Transcription failed.");
+      }
+
+      const data = await res.json();
+      setTranscribeResult(data);
+    } catch (err) {
+      console.error(err);
+      alert("Error: " + err.message);
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
@@ -389,6 +437,12 @@ export default function App() {
             onClick={() => setCurrentView("survey")}
           >
             <i className="fa-solid fa-list-check"></i> Take Survey
+          </button>
+          <button 
+            className={`nav-btn ${currentView === "transcribe" ? "active" : ""}`} 
+            onClick={() => setCurrentView("transcribe")}
+          >
+            <i className="fa-solid fa-file-audio"></i> Transcribe Audio
           </button>
           <button 
             className={`nav-btn ${currentView === "admin" ? "active" : ""}`} 
@@ -796,6 +850,147 @@ export default function App() {
               </div>
             </div>
 
+          </section>
+        )}
+
+        {currentView === "transcribe" && (
+          <section id="transcribe-section" className="app-view active fade-in">
+            <div className="card fade-in">
+              <div className="card-header gradient-2">
+                <h2><i className="fa-solid fa-microphone-lines"></i> Transcribe Custom Audio</h2>
+                <p>Upload a custom audio file and run transcription locally with Faster-Whisper.</p>
+              </div>
+              <div className="card-body">
+                <form onSubmit={handleTranscribeSubmit}>
+                  <div className="form-group">
+                    <label htmlFor="audio-file">Select Audio File (WAV, MP3, M4A, OGG) <span className="required">*</span></label>
+                    <input 
+                      type="file" 
+                      id="audio-file" 
+                      accept="audio/*"
+                      onChange={(e) => setTranscribeFile(e.target.files[0])}
+                      style={{
+                        width: "100%",
+                        background: "rgba(11, 15, 25, 0.6)",
+                        border: "1px dashed var(--border-color)",
+                        padding: "20px",
+                        borderRadius: "var(--radius-md)",
+                        color: "var(--text-secondary)",
+                        cursor: "pointer"
+                      }}
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="transcribe-model">Whisper Model</label>
+                      <select 
+                        id="transcribe-model" 
+                        value={transcribeModel}
+                        onChange={(e) => setTranscribeModel(e.target.value)}
+                      >
+                        <option value="tiny">Tiny (Fastest, ~39M params)</option>
+                        <option value="base">Base (Balanced, ~74M params)</option>
+                        <option value="small">Small (High Accuracy, ~244M params)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="transcribe-language">Language (Optional)</label>
+                      <select 
+                        id="transcribe-language" 
+                        value={transcribeLanguage}
+                        onChange={(e) => setTranscribeLanguage(e.target.value)}
+                      >
+                        <option value="">Auto-Detect Language</option>
+                        <option value="en">English (en)</option>
+                        <option value="es">Spanish (es)</option>
+                        <option value="fr">French (fr)</option>
+                        <option value="de">German (de)</option>
+                        <option value="it">Italian (it)</option>
+                        <option value="zh">Chinese (zh)</option>
+                        <option value="ja">Japanese (ja)</option>
+                        <option value="hi">Hindi (hi)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="btn btn-primary btn-block"
+                    disabled={isTranscribing}
+                    style={{ marginTop: "10px" }}
+                  >
+                    {isTranscribing ? (
+                      <>
+                        <i className="fa-solid fa-circle-notch fa-spin"></i> Transcribing Audio...
+                      </>
+                    ) : (
+                      <>
+                        <i className="fa-solid fa-play"></i> Run Transcription
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {transcribeResult && (
+              <div className="card fade-in" style={{ border: "1px solid rgba(16, 185, 129, 0.3)" }}>
+                <div className="card-header gradient-1" style={{ borderBottom: "1px solid rgba(16, 185, 129, 0.2)" }}>
+                  <h2><i className="fa-solid fa-square-poll-horizontal"></i> Transcription Results</h2>
+                  <p>Inference successfully completed on local machine.</p>
+                </div>
+                <div className="card-body">
+                  <div className="stats-overview-grid" style={{ marginBottom: "20px" }}>
+                    <div className="metric-card" style={{ padding: "12px 18px", gap: "12px" }}>
+                      <div className="metric-icon gradient-1" style={{ width: "35px", height: "35px", fontSize: "14px" }}>
+                        <i className="fa-solid fa-language"></i>
+                      </div>
+                      <div className="metric-info">
+                        <h3 style={{ fontSize: "18px" }}>{transcribeResult.language ? transcribeResult.language.toUpperCase() : "N/A"}</h3>
+                        <p style={{ margin: 0, fontSize: "10px" }}>Language</p>
+                      </div>
+                    </div>
+                    <div className="metric-card" style={{ padding: "12px 18px", gap: "12px" }}>
+                      <div className="metric-icon gradient-2" style={{ width: "35px", height: "35px", fontSize: "14px" }}>
+                        <i className="fa-solid fa-clock"></i>
+                      </div>
+                      <div className="metric-info">
+                        <h3 style={{ fontSize: "18px" }}>{transcribeResult.duration ? transcribeResult.duration.toFixed(2) : "0.00"}s</h3>
+                        <p style={{ margin: 0, fontSize: "10px" }}>Audio Duration</p>
+                      </div>
+                    </div>
+                    <div className="metric-card" style={{ padding: "12px 18px", gap: "12px" }}>
+                      <div className="metric-icon gradient-3" style={{ width: "35px", height: "35px", fontSize: "14px" }}>
+                        <i className="fa-solid fa-bolt"></i>
+                      </div>
+                      <div className="metric-info">
+                        <h3 style={{ fontSize: "18px" }}>{transcribeResult.latency ? transcribeResult.latency.toFixed(2) : "0.00"}s</h3>
+                        <p style={{ margin: 0, fontSize: "10px" }}>Inference Latency</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="reference-phrase-box" style={{ background: "rgba(0, 0, 0, 0.2)", padding: "20px" }}>
+                    <span className="label" style={{ color: "var(--accent)" }}>Transcribed Text:</span>
+                    <blockquote style={{ fontSize: "15px", whiteSpace: "pre-wrap", fontWeight: "normal" }}>
+                      {transcribeResult.text || <span className="text-muted" style={{ fontStyle: "italic" }}>No text transcribed.</span>}
+                    </blockquote>
+                  </div>
+
+                  <button 
+                    className="btn btn-secondary btn-block"
+                    onClick={() => {
+                      navigator.clipboard.writeText(transcribeResult.text || "");
+                      alert("Copied to clipboard!");
+                    }}
+                  >
+                    <i className="fa-solid fa-copy"></i> Copy Text to Clipboard
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         )}
 

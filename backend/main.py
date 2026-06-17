@@ -1,12 +1,22 @@
 import os
 import json
 import math
+import sys
+import uuid
+import time
 from typing import Dict, List, Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import redis
+
+# Ensure services directory is importable
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from services.stt.whisper_wrapper import transcribe as whisper_transcribe
 
 app = FastAPI(title="STT and TTS Survey Evaluation Platform")
 
@@ -258,6 +268,70 @@ def get_survey_results():
         "total_submissions": len(responses),
         "raw_responses": responses
     }
+
+# Create a temp directory inside the project root for temporary uploads
+TEMP_DIR = os.path.join(project_root, "backend", "temp_uploads")
+
+@app.post("/api/transcribe")
+async def transcribe_audio_endpoint(
+    file: UploadFile = File(...),
+    model: str = Form(None),
+    language: str = Form(None),
+    model_query: str = Query(None, alias="model"),
+    language_query: str = Query(None, alias="language"),
+):
+    selected_model = model or model_query
+    selected_language = language or language_query
+    
+    # Ensure temporary upload directory exists
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    
+    # Generate a unique path for the uploaded file inside the workspace
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    temp_file_name = f"{uuid.uuid4()}{file_extension}"
+    temp_file_path = os.path.join(TEMP_DIR, temp_file_name)
+    
+    try:
+        # Write UploadFile to disk chunk-by-chunk to save memory
+        with open(temp_file_path, "wb") as f:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                f.write(content)
+                
+        # Prepare optional transcription parameters
+        transcribe_kwargs = {}
+        if selected_language:
+            # Strip whitespace and convert empty string to None
+            lang_stripped = selected_language.strip()
+            if lang_stripped:
+                transcribe_kwargs["language"] = lang_stripped
+                
+        # Measure latency
+        start_time = time.time()
+        result = whisper_transcribe(
+            audio_path=temp_file_path,
+            model_size=selected_model,
+            **transcribe_kwargs
+        )
+        latency = time.time() - start_time
+        
+        return {
+            "text": result["text"],
+            "language": result["metadata"]["language"],
+            "duration": result["metadata"]["duration"],
+            "latency": round(latency, 4)
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"Error during audio transcription: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        # Securely clean up the temp file
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception as e:
+                print(f"Failed to clean up temp file {temp_file_path}: {str(e)}")
 
 # Mount static audio directories for direct serving
 if os.path.exists(DATA_DIR):
