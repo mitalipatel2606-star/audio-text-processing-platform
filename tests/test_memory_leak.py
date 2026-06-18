@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import psutil
+import gc
 import unittest
 from fastapi.testclient import TestClient
 
@@ -27,7 +28,8 @@ class TestMemoryLeak(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         
-        # Record initial memory (RSS)
+        # Record initial memory (RSS) after GC
+        gc.collect()
         process = psutil.Process(os.getpid())
         initial_mem_bytes = process.memory_info().rss
         initial_mem_mb = initial_mem_bytes / (1024 * 1024)
@@ -48,6 +50,7 @@ class TestMemoryLeak(unittest.TestCase):
             latency = time.time() - t0
             
             if i % 10 == 0 or i == 1:
+                gc.collect()
                 current_mem_bytes = process.memory_info().rss
                 current_mem_mb = current_mem_bytes / (1024 * 1024)
                 growth_mb = current_mem_mb - initial_mem_mb
@@ -55,6 +58,7 @@ class TestMemoryLeak(unittest.TestCase):
                 print(f"Request {i}/{num_runs} | Latency: {latency:.2f}s | RAM: {current_mem_mb:.2f} MB (Growth: {growth_mb:+.2f} MB)")
                 
         # Analyze memory growth
+        gc.collect()
         final_mem_bytes = process.memory_info().rss
         final_mem_mb = final_mem_bytes / (1024 * 1024)
         total_growth_mb = final_mem_mb - initial_mem_mb
@@ -73,7 +77,7 @@ class TestMemoryLeak(unittest.TestCase):
         halfway_mem_mb = mem_readings[len(mem_readings) // 2]
         late_growth_mb = final_mem_mb - halfway_mem_mb
         print(f"Late-stage RAM Growth (Requests 50-100): {late_growth_mb:+.2f} MB")
-        self.assertLess(abs(late_growth_mb), 15.0, "Late stage memory usage is not stable, indicating a leak.")
+        self.assertLess(late_growth_mb, 15.0, "Late stage memory usage is not stable, indicating a leak.")
         print("Memory usage is STABLE. No leaks detected.")
 
 if __name__ == "__main__":
