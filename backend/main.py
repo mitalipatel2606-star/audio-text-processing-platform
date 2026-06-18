@@ -6,7 +6,7 @@ import uuid
 import time
 import subprocess
 from typing import Dict, List, Any
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -307,7 +307,17 @@ async def transcribe_audio_endpoint(
     language: str = Form(None),
     model_query: str = Query(None, alias="model"),
     language_query: str = Query(None, alias="language"),
+    authorization: str = Header(None),
 ):
+    # Optional Bearer Token Authentication
+    expected_token = os.environ.get("STT_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
     selected_model = model or model_query
     selected_language = language or language_query
     

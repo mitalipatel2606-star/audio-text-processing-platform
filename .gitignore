@@ -13,3 +13,11 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Coverage reports
+.coverage
+htmlcov/
+*.cover
+
+# Environments
+.venv/
