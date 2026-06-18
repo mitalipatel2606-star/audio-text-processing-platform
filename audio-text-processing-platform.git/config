@@ -1,0 +1,11 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+	ignorecase = true
+	precomposeunicode = true
+[remote "origin"]
+	url = https://github.com/mitalipatel2606-star/audio-text-processing-platform.git
+[remote "target"]
+	url = https://github.com/MindSyncX-Labs/audio-text-processing-platform.git
+	fetch = +refs/heads/*:refs/remotes/target/*

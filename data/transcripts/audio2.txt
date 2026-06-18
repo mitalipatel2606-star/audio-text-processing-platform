@@ -1,0 +1,1 @@
+Hello everyone. My name is Mitali Patel and today I am testing the speech recognition system. The purpose of this recording is to evaluate how accurately spoken words are converted into text. This sample contains clear pronunciation and minimal background noise.
