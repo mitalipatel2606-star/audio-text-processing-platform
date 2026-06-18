@@ -4,6 +4,7 @@ import math
 import sys
 import uuid
 import time
+import subprocess
 from typing import Dict, List, Any
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.staticfiles import StaticFiles
@@ -272,6 +273,33 @@ def get_survey_results():
 # Create a temp directory inside the project root for temporary uploads
 TEMP_DIR = os.path.join(project_root, "backend", "temp_uploads")
 
+def convert_audio_to_wav(input_path: str, output_path: str):
+    """
+    Converts any audio file format (MP3, WAV, WebM, FLAC, OGG, etc.)
+    to a standardized 16kHz mono 16-bit PCM WAV using FFmpeg.
+    """
+    command = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-ar", "16000",
+        "-ac", "1",
+        "-c:a", "pcm_s16le",
+        output_path
+    ]
+    try:
+        # Run subprocess with timeout to prevent hang
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            timeout=30.0
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("FFmpeg conversion timed out after 30 seconds.")
+    except subprocess.CalledProcessError as e:
+        stderr_msg = e.stderr.decode("utf-8", errors="ignore")
+        raise RuntimeError(f"FFmpeg conversion failed: {stderr_msg}")
+
 @app.post("/api/v1/stt")
 async def transcribe_audio_endpoint(
     file: UploadFile = File(...),
@@ -291,12 +319,22 @@ async def transcribe_audio_endpoint(
     temp_file_name = f"{uuid.uuid4()}{file_extension}"
     temp_file_path = os.path.join(TEMP_DIR, temp_file_name)
     
+    # Generate a path for the standardized converted WAV file
+    converted_file_name = f"{uuid.uuid4()}_converted.wav"
+    converted_file_path = os.path.join(TEMP_DIR, converted_file_name)
+    
     try:
         # Write UploadFile to disk chunk-by-chunk to save memory
         with open(temp_file_path, "wb") as f:
             while content := await file.read(1024 * 1024):  # 1MB chunks
                 f.write(content)
                 
+        # Convert audio using ffmpeg to the expected format (16kHz mono 16-bit WAV)
+        try:
+            convert_audio_to_wav(temp_file_path, converted_file_path)
+        except Exception as ce:
+            raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
+            
         # Prepare optional transcription parameters
         transcribe_kwargs = {}
         if selected_language:
@@ -308,7 +346,7 @@ async def transcribe_audio_endpoint(
         # Measure latency
         start_time = time.time()
         result = whisper_transcribe(
-            audio_path=temp_file_path,
+            audio_path=converted_file_path,
             model_size=selected_model,
             **transcribe_kwargs
         )
@@ -322,16 +360,19 @@ async def transcribe_audio_endpoint(
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException as e:
+        raise e
     except Exception as e:
         print(f"Error during audio transcription: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
     finally:
-        # Securely clean up the temp file
-        if os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except Exception as e:
-                print(f"Failed to clean up temp file {temp_file_path}: {str(e)}")
+        # Securely clean up the temp files
+        for path in [temp_file_path, converted_file_path]:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    print(f"Failed to clean up temp file {path}: {str(e)}")
 
 # Mount static audio directories for direct serving
 if os.path.exists(DATA_DIR):
