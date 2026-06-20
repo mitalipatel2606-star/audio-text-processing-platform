@@ -6,7 +6,8 @@ import uuid
 import time
 import subprocess
 from typing import Dict, List, Any
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header, Request
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -18,6 +19,8 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from services.stt.whisper_wrapper import transcribe as whisper_transcribe
+from services.tts.piper_wrapper import synthesize, VOICE_MAP
+from services.nlp.nlu_service import analyze_text
 
 app = FastAPI(title="STT and TTS Survey Evaluation Platform")
 
@@ -383,6 +386,204 @@ async def transcribe_audio_endpoint(
                     os.remove(path)
                 except Exception as e:
                     print(f"Failed to clean up temp file {path}: {str(e)}")
+
+def convert_audio_format(wav_bytes: bytes, target_format: str) -> bytes:
+    """
+    Converts standard WAV bytes to the requested format (mp3/ogg) on the fly
+    using ffmpeg stdin/stdout piping.
+    """
+    target_format = target_format.lower().strip()
+    if target_format == "wav":
+        return wav_bytes
+    
+    if target_format not in ["mp3", "ogg"]:
+        raise ValueError(f"Unsupported audio format: {target_format}")
+    
+    codec = "libmp3lame" if target_format == "mp3" else "libopus"
+    
+    command = [
+        "ffmpeg", "-y",
+        "-i", "pipe:0",
+        "-acodec", codec,
+        "-f", target_format,
+        "pipe:1"
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=wav_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            timeout=30.0
+        )
+        return result.stdout
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"FFmpeg conversion to {target_format} timed out.")
+    except subprocess.CalledProcessError as e:
+        stderr_msg = e.stderr.decode("utf-8", errors="ignore")
+        raise RuntimeError(f"FFmpeg conversion to {target_format} failed: {stderr_msg}")
+
+@app.post("/api/v1/tts")
+async def text_to_speech_endpoint(
+    request: Request,
+    text: str = Form(None),
+    voice: str = Form(None),
+    format: str = Form(None),
+    text_query: str = Query(None, alias="text"),
+    voice_query: str = Query(None, alias="voice"),
+    format_query: str = Query(None, alias="format"),
+    authorization: str = Header(None),
+):
+    # Optional Bearer Token Authentication
+    expected_token = os.environ.get("TTS_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
+    # Resolve parameter values (order of preference: request body JSON/Form -> Query parameters)
+    req_text = text
+    req_voice = voice
+    req_format = format
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                req_text = body.get("text", req_text)
+                req_voice = body.get("voice", req_voice)
+                req_format = body.get("format", req_format)
+        except Exception:
+            pass
+
+    # Fallback to query parameters if still empty
+    if not req_text:
+        req_text = text_query
+    if not req_voice:
+        req_voice = voice_query
+    if not req_format:
+        req_format = format_query
+
+    # Validate parameters
+    # 1. Text validation
+    if not req_text or not isinstance(req_text, str) or not req_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'text' parameter is required and cannot be empty."
+        )
+    if len(req_text) > 5000:
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'text' parameter exceeds maximum length of 5000 characters."
+        )
+
+    # 2. Voice validation
+    if not req_voice:
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'voice' parameter is required."
+        )
+    voice_lower = req_voice.lower().strip()
+    if voice_lower not in VOICE_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bad Request: Unknown voice alias '{req_voice}'. Supported voices: {list(VOICE_MAP.keys())}"
+        )
+
+    # 3. Format validation
+    if not req_format:
+        req_format = "wav"
+    format_lower = req_format.lower().strip()
+    if format_lower not in ["wav", "mp3", "ogg"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bad Request: Unsupported format '{req_format}'. Supported formats: ['wav', 'mp3', 'ogg']"
+        )
+
+    # Determine media type
+    if format_lower == "wav":
+        media_type = "audio/wav"
+    elif format_lower == "mp3":
+        media_type = "audio/mpeg"
+    else:
+        media_type = "audio/ogg"
+
+    import io
+    try:
+        # Synthesize audio using Piper
+        wav_bytes = synthesize(req_text, voice_lower)
+        
+        # Convert audio format if needed
+        audio_bytes = convert_audio_format(wav_bytes, format_lower)
+        
+        # Stream the audio response
+        return StreamingResponse(
+            io.BytesIO(audio_bytes),
+            media_type=media_type
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"Error during TTS synthesis: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS synthesis/conversion failed: {str(e)}"
+        )
+
+@app.post("/api/v1/nlu")
+async def nlu_endpoint(
+    request: Request,
+    text: str = Form(None),
+    text_query: str = Query(None, alias="text"),
+    authorization: str = Header(None),
+):
+    # Optional Bearer Token Authentication
+    expected_token = os.environ.get("NLU_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
+    # Resolve parameter values (order of preference: request body JSON/Form -> Query parameters)
+    req_text = text
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                req_text = body.get("text", req_text)
+        except Exception:
+            pass
+
+    # Fallback to query parameters if still empty
+    if not req_text:
+        req_text = text_query
+
+    # Validate parameters
+    # Text validation
+    if not req_text or not isinstance(req_text, str) or not req_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'text' parameter is required and cannot be empty."
+        )
+
+    try:
+        # Run NLU analyze using services/nlp/nlu_service.py
+        result = analyze_text(req_text)
+        return result
+    except Exception as e:
+        print(f"Error during NLU parsing: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"NLU parsing failed: {str(e)}"
+        )
 
 # Mount static audio directories for direct serving
 if os.path.exists(DATA_DIR):
