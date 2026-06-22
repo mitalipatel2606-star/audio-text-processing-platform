@@ -5,6 +5,10 @@ import sys
 import uuid
 import time
 import subprocess
+import wave
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from typing import Dict, List, Any
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header, Request
 from fastapi.responses import StreamingResponse
@@ -22,7 +26,40 @@ from services.stt.whisper_wrapper import transcribe as whisper_transcribe
 from services.tts.piper_wrapper import synthesize, VOICE_MAP
 from services.nlp.nlu_service import analyze_text
 
-app = FastAPI(title="STT and TTS Survey Evaluation Platform")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm-load models concurrently
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        
+        # Warmup Whisper models
+        def warm_whisper(model_size):
+            from services.stt.whisper_wrapper import load_model
+            try:
+                load_model(model_size)
+            except Exception as e:
+                print(f"Error warm-loading Whisper {model_size}: {e}")
+                
+        # Warmup Piper voices
+        def warm_piper_voice(voice_name):
+            from services.tts.piper_wrapper import load_voice
+            try:
+                load_voice(voice_name)
+            except Exception as e:
+                print(f"Error warm-loading Piper voice {voice_name}: {e}")
+                
+        # We load 'base' as default, and 'tiny' since tests use it heavily
+        futures.append(loop.run_in_executor(executor, warm_whisper, "base"))
+        futures.append(loop.run_in_executor(executor, warm_whisper, "tiny"))
+        
+        for voice in VOICE_MAP.keys():
+            futures.append(loop.run_in_executor(executor, warm_piper_voice, voice))
+            
+        await asyncio.gather(*futures)
+    yield
+
+app = FastAPI(title="STT and TTS Survey Evaluation Platform", lifespan=lifespan)
 
 _redis_client = None
 
@@ -276,6 +313,18 @@ def get_survey_results():
 # Create a temp directory inside the project root for temporary uploads
 TEMP_DIR = os.path.join(project_root, "backend", "temp_uploads")
 
+def check_wav_format(file_path: str) -> bool:
+    """Checks if the file is a 16kHz mono 16-bit PCM WAV."""
+    try:
+        with wave.open(file_path, "rb") as w:
+            params = w.getparams()
+            return (params.nchannels == 1 and 
+                    params.sampwidth == 2 and 
+                    params.framerate == 16000 and 
+                    params.comptype == "NONE")
+    except Exception:
+        return False
+
 def convert_audio_to_wav(input_path: str, output_path: str):
     """
     Converts any audio file format (MP3, WAV, WebM, FLAC, OGG, etc.)
@@ -342,11 +391,15 @@ async def transcribe_audio_endpoint(
             while content := await file.read(1024 * 1024):  # 1MB chunks
                 f.write(content)
                 
-        # Convert audio using ffmpeg to the expected format (16kHz mono 16-bit WAV)
-        try:
-            convert_audio_to_wav(temp_file_path, converted_file_path)
-        except Exception as ce:
-            raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
+        # Check if the audio is already in the correct WAV format
+        if check_wav_format(temp_file_path):
+            converted_file_path = temp_file_path  # Skip conversion
+        else:
+            # Convert audio using ffmpeg to the expected format (16kHz mono 16-bit WAV)
+            try:
+                convert_audio_to_wav(temp_file_path, converted_file_path)
+            except Exception as ce:
+                raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
             
         # Prepare optional transcription parameters
         transcribe_kwargs = {}
