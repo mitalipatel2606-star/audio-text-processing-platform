@@ -5,6 +5,7 @@ import sys
 import uuid
 import time
 import subprocess
+import base64
 import wave
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -637,6 +638,95 @@ async def nlu_endpoint(
             status_code=500,
             detail=f"NLU parsing failed: {str(e)}"
         )
+
+@app.post("/api/v1/process")
+async def process_audio_endpoint(
+    file: UploadFile = File(...),
+    tts_voice: str = Form("amy"),
+    tts_format: str = Form("wav"),
+    authorization: str = Header(None),
+):
+    # Optional Bearer Token Authentication (reusing STT token or define PROCESS_AUTH_TOKEN)
+    expected_token = os.environ.get("PROCESS_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
+    # 1. Process Audio for STT
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    temp_file_name = f"{uuid.uuid4()}{file_extension}"
+    temp_file_path = os.path.join(TEMP_DIR, temp_file_name)
+    converted_file_name = f"{uuid.uuid4()}_converted.wav"
+    converted_file_path = os.path.join(TEMP_DIR, converted_file_name)
+
+    try:
+        with open(temp_file_path, "wb") as f:
+            while content := await file.read(1024 * 1024):
+                f.write(content)
+
+        if check_wav_format(temp_file_path):
+            converted_file_path = temp_file_path
+        else:
+            try:
+                convert_audio_to_wav(temp_file_path, converted_file_path)
+            except Exception as ce:
+                raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
+
+        # 2. STT
+        start_time = time.time()
+        stt_result = whisper_transcribe(audio_path=converted_file_path)
+        transcribed_text = stt_result["text"]
+
+        # 3. NLU
+        nlu_result = analyze_text(transcribed_text)
+        detected_intent = nlu_result["intent"]
+
+        # 4. TTS
+        response_text = f"I heard you say: {transcribed_text}. The detected intent is {detected_intent}."
+        
+        # Validate voice
+        voice_lower = tts_voice.lower().strip()
+        if voice_lower not in VOICE_MAP:
+            voice_lower = "amy"
+            
+        # Validate format
+        format_lower = tts_format.lower().strip()
+        if format_lower not in ["wav", "mp3", "ogg"]:
+            format_lower = "wav"
+            
+        wav_bytes = synthesize(response_text, voice_lower)
+        audio_bytes = convert_audio_format(wav_bytes, format_lower)
+        
+        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        latency = time.time() - start_time
+        
+        return {
+            "input_text": transcribed_text,
+            "nlu_data": nlu_result,
+            "audio_response_base64": audio_base64,
+            "audio_format": format_lower,
+            "latency": round(latency, 4)
+        }
+    except Exception as e:
+        print(f"Error during unified process: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Process failed: {str(e)}")
+    finally:
+        for path in [temp_file_path, converted_file_path]:
+            if os.path.exists(path) and path != temp_file_path or (path == temp_file_path and not check_wav_format(temp_file_path)):
+                # Be careful not to delete temp_file_path twice if it equals converted_file_path
+                pass
+            # Just safely remove both if they exist, but deduplicate
+        for path in set([temp_file_path, converted_file_path]):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
 # Mount static audio directories for direct serving
 if os.path.exists(DATA_DIR):
