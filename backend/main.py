@@ -5,8 +5,14 @@ import sys
 import uuid
 import time
 import subprocess
+import base64
+import wave
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from typing import Dict, List, Any
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header, Request
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -18,8 +24,43 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from services.stt.whisper_wrapper import transcribe as whisper_transcribe
+from services.tts.piper_wrapper import synthesize, VOICE_MAP
+from services.nlp.nlu_service import analyze_text
 
-app = FastAPI(title="STT and TTS Survey Evaluation Platform")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm-load models concurrently
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        
+        # Warmup Whisper models
+        def warm_whisper(model_size):
+            from services.stt.whisper_wrapper import load_model
+            try:
+                load_model(model_size)
+            except Exception as e:
+                print(f"Error warm-loading Whisper {model_size}: {e}")
+                
+        # Warmup Piper voices
+        def warm_piper_voice(voice_name):
+            from services.tts.piper_wrapper import load_voice
+            try:
+                load_voice(voice_name)
+            except Exception as e:
+                print(f"Error warm-loading Piper voice {voice_name}: {e}")
+                
+        # We load 'base' as default, and 'tiny' since tests use it heavily
+        futures.append(loop.run_in_executor(executor, warm_whisper, "base"))
+        futures.append(loop.run_in_executor(executor, warm_whisper, "tiny"))
+        
+        for voice in VOICE_MAP.keys():
+            futures.append(loop.run_in_executor(executor, warm_piper_voice, voice))
+            
+        await asyncio.gather(*futures)
+    yield
+
+app = FastAPI(title="STT and TTS Survey Evaluation Platform", lifespan=lifespan)
 
 _redis_client = None
 
@@ -273,6 +314,18 @@ def get_survey_results():
 # Create a temp directory inside the project root for temporary uploads
 TEMP_DIR = os.path.join(project_root, "backend", "temp_uploads")
 
+def check_wav_format(file_path: str) -> bool:
+    """Checks if the file is a 16kHz mono 16-bit PCM WAV."""
+    try:
+        with wave.open(file_path, "rb") as w:
+            params = w.getparams()
+            return (params.nchannels == 1 and 
+                    params.sampwidth == 2 and 
+                    params.framerate == 16000 and 
+                    params.comptype == "NONE")
+    except Exception:
+        return False
+
 def convert_audio_to_wav(input_path: str, output_path: str):
     """
     Converts any audio file format (MP3, WAV, WebM, FLAC, OGG, etc.)
@@ -339,11 +392,15 @@ async def transcribe_audio_endpoint(
             while content := await file.read(1024 * 1024):  # 1MB chunks
                 f.write(content)
                 
-        # Convert audio using ffmpeg to the expected format (16kHz mono 16-bit WAV)
-        try:
-            convert_audio_to_wav(temp_file_path, converted_file_path)
-        except Exception as ce:
-            raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
+        # Check if the audio is already in the correct WAV format
+        if check_wav_format(temp_file_path):
+            converted_file_path = temp_file_path  # Skip conversion
+        else:
+            # Convert audio using ffmpeg to the expected format (16kHz mono 16-bit WAV)
+            try:
+                convert_audio_to_wav(temp_file_path, converted_file_path)
+            except Exception as ce:
+                raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
             
         # Prepare optional transcription parameters
         transcribe_kwargs = {}
@@ -383,6 +440,293 @@ async def transcribe_audio_endpoint(
                     os.remove(path)
                 except Exception as e:
                     print(f"Failed to clean up temp file {path}: {str(e)}")
+
+def convert_audio_format(wav_bytes: bytes, target_format: str) -> bytes:
+    """
+    Converts standard WAV bytes to the requested format (mp3/ogg) on the fly
+    using ffmpeg stdin/stdout piping.
+    """
+    target_format = target_format.lower().strip()
+    if target_format == "wav":
+        return wav_bytes
+    
+    if target_format not in ["mp3", "ogg"]:
+        raise ValueError(f"Unsupported audio format: {target_format}")
+    
+    codec = "libmp3lame" if target_format == "mp3" else "libopus"
+    
+    command = [
+        "ffmpeg", "-y",
+        "-i", "pipe:0",
+        "-acodec", codec,
+        "-f", target_format,
+        "pipe:1"
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=wav_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            timeout=30.0
+        )
+        return result.stdout
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"FFmpeg conversion to {target_format} timed out.")
+    except subprocess.CalledProcessError as e:
+        stderr_msg = e.stderr.decode("utf-8", errors="ignore")
+        raise RuntimeError(f"FFmpeg conversion to {target_format} failed: {stderr_msg}")
+
+@app.post("/api/v1/tts")
+async def text_to_speech_endpoint(
+    request: Request,
+    text: str = Form(None),
+    voice: str = Form(None),
+    format: str = Form(None),
+    text_query: str = Query(None, alias="text"),
+    voice_query: str = Query(None, alias="voice"),
+    format_query: str = Query(None, alias="format"),
+    authorization: str = Header(None),
+):
+    # Optional Bearer Token Authentication
+    expected_token = os.environ.get("TTS_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
+    # Resolve parameter values (order of preference: request body JSON/Form -> Query parameters)
+    req_text = text
+    req_voice = voice
+    req_format = format
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                req_text = body.get("text", req_text)
+                req_voice = body.get("voice", req_voice)
+                req_format = body.get("format", req_format)
+        except Exception:
+            pass
+
+    # Fallback to query parameters if still empty
+    if not req_text:
+        req_text = text_query
+    if not req_voice:
+        req_voice = voice_query
+    if not req_format:
+        req_format = format_query
+
+    # Validate parameters
+    # 1. Text validation
+    if not req_text or not isinstance(req_text, str) or not req_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'text' parameter is required and cannot be empty."
+        )
+    if len(req_text) > 5000:
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'text' parameter exceeds maximum length of 5000 characters."
+        )
+
+    # 2. Voice validation
+    if not req_voice:
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'voice' parameter is required."
+        )
+    voice_lower = req_voice.lower().strip()
+    if voice_lower not in VOICE_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bad Request: Unknown voice alias '{req_voice}'. Supported voices: {list(VOICE_MAP.keys())}"
+        )
+
+    # 3. Format validation
+    if not req_format:
+        req_format = "wav"
+    format_lower = req_format.lower().strip()
+    if format_lower not in ["wav", "mp3", "ogg"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bad Request: Unsupported format '{req_format}'. Supported formats: ['wav', 'mp3', 'ogg']"
+        )
+
+    # Determine media type
+    if format_lower == "wav":
+        media_type = "audio/wav"
+    elif format_lower == "mp3":
+        media_type = "audio/mpeg"
+    else:
+        media_type = "audio/ogg"
+
+    import io
+    try:
+        # Synthesize audio using Piper
+        wav_bytes = synthesize(req_text, voice_lower)
+        
+        # Convert audio format if needed
+        audio_bytes = convert_audio_format(wav_bytes, format_lower)
+        
+        # Stream the audio response
+        return StreamingResponse(
+            io.BytesIO(audio_bytes),
+            media_type=media_type
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"Error during TTS synthesis: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS synthesis/conversion failed: {str(e)}"
+        )
+
+@app.post("/api/v1/nlu")
+async def nlu_endpoint(
+    request: Request,
+    text: str = Form(None),
+    text_query: str = Query(None, alias="text"),
+    authorization: str = Header(None),
+):
+    # Optional Bearer Token Authentication
+    expected_token = os.environ.get("NLU_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
+    # Resolve parameter values (order of preference: request body JSON/Form -> Query parameters)
+    req_text = text
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                req_text = body.get("text", req_text)
+        except Exception:
+            pass
+
+    # Fallback to query parameters if still empty
+    if not req_text:
+        req_text = text_query
+
+    # Validate parameters
+    # Text validation
+    if not req_text or not isinstance(req_text, str) or not req_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request: 'text' parameter is required and cannot be empty."
+        )
+
+    try:
+        # Run NLU analyze using services/nlp/nlu_service.py
+        result = analyze_text(req_text)
+        return result
+    except Exception as e:
+        print(f"Error during NLU parsing: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"NLU parsing failed: {str(e)}"
+        )
+
+@app.post("/api/v1/process")
+async def process_audio_endpoint(
+    file: UploadFile = File(...),
+    tts_voice: str = Form("amy"),
+    tts_format: str = Form("wav"),
+    authorization: str = Header(None),
+):
+    # Optional Bearer Token Authentication (reusing STT token or define PROCESS_AUTH_TOKEN)
+    expected_token = os.environ.get("PROCESS_AUTH_TOKEN")
+    if expected_token:
+        if not authorization or authorization != f"Bearer {expected_token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or missing authentication token"
+            )
+
+    # 1. Process Audio for STT
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    temp_file_name = f"{uuid.uuid4()}{file_extension}"
+    temp_file_path = os.path.join(TEMP_DIR, temp_file_name)
+    converted_file_name = f"{uuid.uuid4()}_converted.wav"
+    converted_file_path = os.path.join(TEMP_DIR, converted_file_name)
+
+    try:
+        with open(temp_file_path, "wb") as f:
+            while content := await file.read(1024 * 1024):
+                f.write(content)
+
+        if check_wav_format(temp_file_path):
+            converted_file_path = temp_file_path
+        else:
+            try:
+                convert_audio_to_wav(temp_file_path, converted_file_path)
+            except Exception as ce:
+                raise HTTPException(status_code=400, detail=f"Audio conversion error: {str(ce)}")
+
+        # 2. STT
+        start_time = time.time()
+        stt_result = whisper_transcribe(audio_path=converted_file_path)
+        transcribed_text = stt_result["text"]
+
+        # 3. NLU
+        nlu_result = analyze_text(transcribed_text)
+        detected_intent = nlu_result["intent"]
+
+        # 4. TTS
+        response_text = f"I heard you say: {transcribed_text}. The detected intent is {detected_intent}."
+        
+        # Validate voice
+        voice_lower = tts_voice.lower().strip()
+        if voice_lower not in VOICE_MAP:
+            voice_lower = "amy"
+            
+        # Validate format
+        format_lower = tts_format.lower().strip()
+        if format_lower not in ["wav", "mp3", "ogg"]:
+            format_lower = "wav"
+            
+        wav_bytes = synthesize(response_text, voice_lower)
+        audio_bytes = convert_audio_format(wav_bytes, format_lower)
+        
+        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        latency = time.time() - start_time
+        
+        return {
+            "input_text": transcribed_text,
+            "nlu_data": nlu_result,
+            "audio_response_base64": audio_base64,
+            "audio_format": format_lower,
+            "latency": round(latency, 4)
+        }
+    except Exception as e:
+        print(f"Error during unified process: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Process failed: {str(e)}")
+    finally:
+        for path in [temp_file_path, converted_file_path]:
+            if os.path.exists(path) and path != temp_file_path or (path == temp_file_path and not check_wav_format(temp_file_path)):
+                # Be careful not to delete temp_file_path twice if it equals converted_file_path
+                pass
+            # Just safely remove both if they exist, but deduplicate
+        for path in set([temp_file_path, converted_file_path]):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
 # Mount static audio directories for direct serving
 if os.path.exists(DATA_DIR):
