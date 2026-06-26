@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Chart from "chart.js/auto";
 
 // Determine API Base URL dynamically
-const API_BASE = window.location.port === "5173" ? "http://localhost:8000" : "";
+const API_BASE = window.location.port === "5173" ? "http://127.0.0.1:8000" : "";
 
 export default function App() {
   // Navigation & View States
