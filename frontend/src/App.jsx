@@ -29,6 +29,13 @@ export default function App() {
   const [transcribeResult, setTranscribeResult] = useState(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
 
+  // Unified Pipeline tool states
+  const [pipelineFile, setPipelineFile] = useState(null);
+  const [pipelineVoice, setPipelineVoice] = useState("amy");
+  const [pipelineFormat, setPipelineFormat] = useState("wav");
+  const [pipelineResult, setPipelineResult] = useState(null);
+  const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
+
   // Chart Canvas Refs
   const ttsChartCanvasRef = useRef(null);
   const sttChartCanvasRef = useRef(null);
@@ -178,6 +185,43 @@ export default function App() {
       alert("Error: " + err.message);
     } finally {
       setIsTranscribing(false);
+    }
+  };
+
+  // Submit custom audio file for unified STT-NLU-TTS processing
+  const handlePipelineSubmit = async (e) => {
+    e.preventDefault();
+    if (!pipelineFile) {
+      alert("Please select or drop an audio file to process.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", pipelineFile);
+    formData.append("tts_voice", pipelineVoice);
+    formData.append("tts_format", pipelineFormat);
+
+    try {
+      setIsProcessingPipeline(true);
+      setPipelineResult(null);
+      
+      const res = await fetch(`${API_BASE}/api/v1/process`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Pipeline processing failed.");
+      }
+
+      const data = await res.json();
+      setPipelineResult(data);
+    } catch (err) {
+      console.error(err);
+      alert("Error: " + err.message);
+    } finally {
+      setIsProcessingPipeline(false);
     }
   };
 
@@ -443,6 +487,12 @@ export default function App() {
             onClick={() => setCurrentView("transcribe")}
           >
             <i className="fa-solid fa-file-audio"></i> Transcribe Audio
+          </button>
+          <button 
+            className={`nav-btn ${currentView === "pipeline" ? "active" : ""}`} 
+            onClick={() => setCurrentView("pipeline")}
+          >
+            <i className="fa-solid fa-arrows-spin"></i> Unified Pipeline
           </button>
           <button 
             className={`nav-btn ${currentView === "admin" ? "active" : ""}`} 
@@ -988,6 +1038,229 @@ export default function App() {
                   >
                     <i className="fa-solid fa-copy"></i> Copy Text to Clipboard
                   </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {currentView === "pipeline" && (
+          <section id="pipeline-section" className="app-view active fade-in">
+            <div className="card fade-in">
+              <div className="card-header gradient-3">
+                <h2><i className="fa-solid fa-arrows-spin"></i> Unified STT-NLU-TTS Pipeline</h2>
+                <p>Upload an audio file to run speech-to-text, extract NLU intent/entities/sentiment, and synthesize a response back to audio.</p>
+              </div>
+              <div className="card-body">
+                <form onSubmit={handlePipelineSubmit}>
+                  <div className="form-group">
+                    <label htmlFor="pipeline-file">Select Audio File (WAV, MP3, M4A, OGG) <span className="required">*</span></label>
+                    <input 
+                      type="file" 
+                      id="pipeline-file" 
+                      accept="audio/*"
+                      onChange={(e) => setPipelineFile(e.target.files[0])}
+                      style={{
+                        width: "100%",
+                        background: "rgba(11, 15, 25, 0.6)",
+                        border: "1px dashed var(--border-color)",
+                        padding: "20px",
+                        borderRadius: "var(--radius-md)",
+                        color: "var(--text-secondary)",
+                        cursor: "pointer"
+                      }}
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="pipeline-voice">TTS Response Voice</label>
+                      <select 
+                        id="pipeline-voice" 
+                        value={pipelineVoice}
+                        onChange={(e) => setPipelineVoice(e.target.value)}
+                      >
+                        <option value="amy">Amy (Medium, female)</option>
+                        <option value="danny">Danny (Low, male)</option>
+                        <option value="joe">Joe (Medium, male)</option>
+                        <option value="lessac">Lessac (Medium, female)</option>
+                        <option value="ryan">Ryan (Medium, male)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="pipeline-format">TTS Audio Format</label>
+                      <select 
+                        id="pipeline-format" 
+                        value={pipelineFormat}
+                        onChange={(e) => setPipelineFormat(e.target.value)}
+                      >
+                        <option value="wav">WAV (Lossless PCM)</option>
+                        <option value="mp3">MP3 (MPEG-3 compressed)</option>
+                        <option value="ogg">OGG (Opus compressed)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="btn btn-primary btn-block"
+                    disabled={isProcessingPipeline}
+                    style={{ marginTop: "10px" }}
+                  >
+                    {isProcessingPipeline ? (
+                      <>
+                        <i className="fa-solid fa-circle-notch fa-spin"></i> Processing Pipeline...
+                      </>
+                    ) : (
+                      <>
+                        <i className="fa-solid fa-play"></i> Run Pipeline
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {pipelineResult && (
+              <div className="card fade-in" style={{ border: "1px solid rgba(59, 130, 246, 0.3)" }}>
+                <div className="card-header gradient-1" style={{ borderBottom: "1px solid rgba(59, 130, 246, 0.2)" }}>
+                  <h2><i className="fa-solid fa-circle-check"></i> Processing Results</h2>
+                  <p>Unified pipeline completed successfully.</p>
+                </div>
+                <div className="card-body">
+                  <div className="stats-overview-grid" style={{ marginBottom: "20px" }}>
+                    <div className="metric-card" style={{ padding: "12px 18px", gap: "12px" }}>
+                      <div className="metric-icon gradient-3" style={{ width: "35px", height: "35px", fontSize: "14px" }}>
+                        <i className="fa-solid fa-bolt"></i>
+                      </div>
+                      <div className="metric-info">
+                        <h3 style={{ fontSize: "18px" }}>{pipelineResult.latency ? pipelineResult.latency.toFixed(2) : "0.00"}s</h3>
+                        <p style={{ margin: 0, fontSize: "10px" }}>Pipeline Latency</p>
+                      </div>
+                    </div>
+                    <div className="metric-card" style={{ padding: "12px 18px", gap: "12px" }}>
+                      <div className="metric-icon gradient-2" style={{ width: "35px", height: "35px", fontSize: "14px" }}>
+                        <i className="fa-solid fa-music"></i>
+                      </div>
+                      <div className="metric-info">
+                        <h3 style={{ fontSize: "18px" }}>{pipelineResult.audio_format ? pipelineResult.audio_format.toUpperCase() : "WAV"}</h3>
+                        <p style={{ margin: 0, fontSize: "10px" }}>Response Audio Format</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="reference-phrase-box" style={{ background: "rgba(0, 0, 0, 0.2)", padding: "20px", marginBottom: "20px" }}>
+                    <span className="label" style={{ color: "var(--accent)" }}>Transcribed Text (STT):</span>
+                    <blockquote style={{ fontSize: "16px", whiteSpace: "pre-wrap", fontWeight: "normal", marginTop: "5px" }}>
+                      {pipelineResult.input_text || <span className="text-muted" style={{ fontStyle: "italic" }}>No text transcribed.</span>}
+                    </blockquote>
+                  </div>
+
+                  <div style={{ marginBottom: "25px", background: "rgba(30, 41, 59, 0.4)", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)" }}>
+                    <h3 style={{ fontSize: "16px", marginBottom: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <i className="fa-solid fa-brain" style={{ color: "var(--accent)" }}></i> NLU Analysis
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "15px" }}>
+                      <div>
+                        <span style={{ fontSize: "12px", color: "var(--text-secondary)", display: "block", marginBottom: "4px" }}>Intent Classification</span>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
+                          <span style={{ fontSize: "18px", fontWeight: "bold", color: "#fff" }}>
+                            {pipelineResult.nlu_data?.intent}
+                          </span>
+                          <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.5)" }}>
+                            (conf: {pipelineResult.nlu_data?.confidence ? (pipelineResult.nlu_data.confidence * 100).toFixed(0) : 0}%)
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "12px", color: "var(--text-secondary)", display: "block", marginBottom: "4px" }}>Sentiment Analysis</span>
+                        <div>
+                          <span style={{ 
+                            fontSize: "14px", 
+                            fontWeight: "bold", 
+                            padding: "4px 8px", 
+                            borderRadius: "4px",
+                            background: pipelineResult.nlu_data?.sentiment?.label === "positive" ? "rgba(16, 185, 129, 0.2)" : pipelineResult.nlu_data?.sentiment?.label === "negative" ? "rgba(239, 68, 68, 0.2)" : "rgba(107, 114, 128, 0.2)",
+                            color: pipelineResult.nlu_data?.sentiment?.label === "positive" ? "#10b981" : pipelineResult.nlu_data?.sentiment?.label === "negative" ? "#ef4444" : "#9ca3af",
+                            border: `1px solid ${pipelineResult.nlu_data?.sentiment?.label === "positive" ? "rgba(16, 185, 129, 0.3)" : pipelineResult.nlu_data?.sentiment?.label === "negative" ? "rgba(239, 68, 68, 0.3)" : "rgba(107, 114, 128, 0.3)"}`
+                          }}>
+                            {pipelineResult.nlu_data?.sentiment?.label?.toUpperCase()}
+                          </span>
+                          <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.5)", marginLeft: "8px" }}>
+                            (score: {pipelineResult.nlu_data?.sentiment?.score})
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: "15px" }}>
+                      <span style={{ fontSize: "12px", color: "var(--text-secondary)", display: "block", marginBottom: "6px" }}>Named Entities</span>
+                      {pipelineResult.nlu_data?.entities && pipelineResult.nlu_data.entities.length > 0 ? (
+                        <div style={{ overflowX: "auto" }}>
+                          <table className="survey-table" style={{ width: "100%", fontSize: "13px" }}>
+                            <thead>
+                              <tr>
+                                <th style={{ padding: "6px 12px" }}>Text</th>
+                                <th style={{ padding: "6px 12px" }}>Type</th>
+                                <th style={{ padding: "6px 12px" }}>Range</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pipelineResult.nlu_data.entities.map((ent, idx) => (
+                                <tr key={idx}>
+                                  <td style={{ padding: "6px 12px" }}><strong>{ent.text}</strong></td>
+                                  <td style={{ padding: "6px 12px" }}><span className="badge">{ent.label}</span></td>
+                                  <td style={{ padding: "6px 12px", color: "rgba(255,255,255,0.4)" }}>[{ent.start}, {ent.end}]</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: "13px", fontStyle: "italic", color: "rgba(255, 255, 255, 0.4)" }}>No named entities extracted.</span>
+                      )}
+                    </div>
+
+                    <div style={{ marginTop: "15px" }}>
+                      <details style={{ cursor: "pointer" }}>
+                        <summary style={{ fontSize: "12px", color: "var(--accent)" }}>Show raw NLU JSON structure</summary>
+                        <pre style={{ 
+                          marginTop: "8px", 
+                          background: "rgba(0,0,0,0.4)", 
+                          padding: "10px", 
+                          borderRadius: "4px", 
+                          fontSize: "11px", 
+                          overflowX: "auto", 
+                          color: "#38bdf8",
+                          border: "1px solid rgba(255,255,255,0.05)"
+                        }}>
+                          {JSON.stringify(pipelineResult.nlu_data, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: "15px", background: "rgba(99, 102, 241, 0.15)", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid rgba(99, 102, 241, 0.3)" }}>
+                    <h3 style={{ fontSize: "16px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <i className="fa-solid fa-volume-high" style={{ color: "var(--accent)" }}></i> Synthesized Response (TTS)
+                    </h3>
+                    <p style={{ fontSize: "13px", color: "rgba(255, 255, 255, 0.7)", marginBottom: "15px" }}>
+                      The text response synthesized by the backend contains transcription details and the NLU intent.
+                    </p>
+                    {pipelineResult.audio_response_base64 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <audio 
+                          controls 
+                          src={`data:audio/${pipelineResult.audio_format};base64,${pipelineResult.audio_response_base64}`} 
+                          style={{ width: "100%", marginTop: "5px" }}
+                        />
+                        <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", alignSelf: "flex-end" }}>
+                          Format: {pipelineResult.audio_format} | Size: {Math.round(pipelineResult.audio_response_base64.length * 0.75 / 1024)} KB
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
