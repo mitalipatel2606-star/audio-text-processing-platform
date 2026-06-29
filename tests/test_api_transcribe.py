@@ -190,7 +190,7 @@ class TestApiTranscribe(unittest.TestCase):
 
     # --- Health Check Tests ---
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.health.db.get_redis_client")
     def test_health_check_redis_connected(self, mock_get_redis):
         mock_client = MagicMock()
         mock_client.ping.return_value = True
@@ -200,7 +200,7 @@ class TestApiTranscribe(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["redis"], "connected")
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.health.db.get_redis_client")
     def test_health_check_redis_disconnected(self, mock_get_redis):
         mock_get_redis.return_value = None
         
@@ -208,7 +208,7 @@ class TestApiTranscribe(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["redis"], "disconnected")
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.health.db.get_redis_client")
     def test_health_check_redis_ping_fail(self, mock_get_redis):
         mock_client = MagicMock()
         mock_client.ping.side_effect = Exception("Connection Refused")
@@ -245,7 +245,7 @@ class TestApiTranscribe(unittest.TestCase):
 
     # --- Submit Survey Tests ---
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.survey.db.get_redis_client")
     @patch("os.path.exists")
     def test_submit_survey_redis_and_disk_success(self, mock_exists, mock_get_redis):
         mock_exists.return_value = True
@@ -266,7 +266,7 @@ class TestApiTranscribe(unittest.TestCase):
             self.assertIn("Saved to Redis & Disk", response.json()["message"])
             mock_redis_client.rpush.assert_called_once()
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.survey.db.get_redis_client")
     @patch("os.path.exists")
     def test_submit_survey_disk_only_redis_fail(self, mock_exists, mock_get_redis):
         mock_exists.return_value = False
@@ -293,7 +293,7 @@ class TestApiTranscribe(unittest.TestCase):
 
     # --- Survey Results Stats Tests ---
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.survey.db.get_redis_client")
     def test_get_survey_results_from_redis(self, mock_get_redis):
         mock_redis_client = MagicMock()
         mock_response_json = '{"userInfo":{"name":"John"}, "ttsResponses":[{"id":"1","voice":"amy","naturalness":5,"pronunciation":4,"intonation":4,"overall":5}], "sttResponses":[{"id":"1","filename":"audio1.wav","clarity":5,"intelligibility":5,"noise":4,"overall":5}], "comments":""}'
@@ -308,7 +308,7 @@ class TestApiTranscribe(unittest.TestCase):
         self.assertEqual(data["summary"]["tts"]["amy"]["overall"]["mean"], 5.0)
         self.assertIn("audio1.wav", data["summary"]["stt"])
 
-    @patch("backend.main.get_redis_client")
+    @patch("backend.routers.survey.db.get_redis_client")
     @patch("os.path.exists")
     def test_get_survey_results_fallback_file(self, mock_exists, mock_get_redis):
         mock_get_redis.return_value = None
