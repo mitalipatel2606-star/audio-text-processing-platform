@@ -13,6 +13,16 @@ services:
       - ./data:/app/data
       - ./backend:/app/backend
       - ./services:/app/services
+      - ./en_US-amy-medium.onnx:/app/en_US-amy-medium.onnx
+      - ./en_US-amy-medium.onnx.json:/app/en_US-amy-medium.onnx.json
+      - ./en_US-danny-low.onnx:/app/en_US-danny-low.onnx
+      - ./en_US-danny-low.onnx.json:/app/en_US-danny-low.onnx.json
+      - ./en_US-joe-medium.onnx:/app/en_US-joe-medium.onnx
+      - ./en_US-joe-medium.onnx.json:/app/en_US-joe-medium.onnx.json
+      - ./en_US-lessac-medium.onnx:/app/en_US-lessac-medium.onnx
+      - ./en_US-lessac-medium.onnx.json:/app/en_US-lessac-medium.onnx.json
+      - ./en_US-ryan-medium.onnx:/app/en_US-ryan-medium.onnx
+      - ./en_US-ryan-medium.onnx.json:/app/en_US-ryan-medium.onnx.json
     depends_on:
       - redis
 
